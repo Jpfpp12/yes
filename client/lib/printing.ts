@@ -100,9 +100,21 @@ export function calculateEstimatedCost(
   // (In a real app, this might sum across all cart items, but per-item volume discount is a good start)
   const totalVolume = volume * quantity;
 
+  let slabs: any[] = [];
   const volumeDiscountSlabs = localStorage.getItem("volumeDiscountSlabs");
+
   if (volumeDiscountSlabs) {
-    const slabs = JSON.parse(volumeDiscountSlabs);
+    slabs = JSON.parse(volumeDiscountSlabs);
+  } else {
+    // Default slabs (same as Admin.tsx defaults)
+    slabs = [
+      { id: "1", minVolume: 2000, discount: 5, label: "Large Order" },
+      { id: "2", minVolume: 4000, discount: 10, label: "Bulk Order" },
+      { id: "3", minVolume: 8000, discount: 15, label: "Enterprise Order" },
+    ];
+  }
+
+  if (slabs.length > 0) {
     // Find the highest applicable discount slab
     // Sort desc by minVolume just in case
     const sortedSlabs = slabs.sort((a: any, b: any) => b.minVolume - a.minVolume);
