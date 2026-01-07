@@ -1,7 +1,10 @@
 import { RequestHandler } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { otpService } from "../services/otpService";
+
+const JWT_SECRET = process.env.JWT_SECRET || "default-secret-key-change-in-prod";
 
 // In-memory storage for demo (use database in production)
 interface User {
@@ -26,17 +29,9 @@ interface OTPData {
   purpose: 'registration' | 'login' | 'reset';
 }
 
-interface Session {
-  userId: string;
-  token: string;
-  expiresAt: Date;
-  rememberMe: boolean;
-}
-
-// In-memory stores (use proper database in production)
+// In-memory stores (re-initialized on every lambda cold start)
 const users: Map<string, User> = new Map();
 const otpStore: Map<string, OTPData> = new Map();
-const sessions: Map<string, Session> = new Map();
 
 // Create default test users for development
 const createDefaultUsers = () => {
@@ -105,14 +100,7 @@ const createDefaultUsers = () => {
     users.set(user.id, user);
   });
 
-  console.log("✅ Default test users created:");
-  console.log(
-    "👑 Admin:  9999999999 | 📧 admin@protofast.com | 🔑 123456"
-  );
-  console.log(
-    "📱 Mobile: 7683999988 | 📧 Email: test1@example.com | 🔑 123456"
-  );
-  console.log("💡 Use any of these credentials to sign in during development");
+  // Debug log usually not seen in production lambda
 };
 
 // Validation schemas
@@ -158,10 +146,6 @@ const generateOTP = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const generateToken = (): string => {
-  return crypto.randomBytes(32).toString("hex");
-};
-
 const isValidIdentifier = (
   identifier: string
 ): { type: "email" | "mobile"; valid: boolean } => {
@@ -198,7 +182,7 @@ const checkWeakPassword = (password: string): boolean => {
   );
 };
 
-// Initialize default users
+// Initialize default users on every load (Lambda cold start)
 createDefaultUsers();
 
 // API Handlers
@@ -206,16 +190,13 @@ export const handleSignUp: RequestHandler = async (req, res) => {
   try {
     const validatedData = signUpSchema.parse(req.body);
 
-    // Check for weak password
     if (checkWeakPassword(validatedData.password)) {
       return res.status(400).json({
         success: false,
-        error:
-          "Password is too weak. Please choose a stronger password with letters and numbers.",
+        error: "Password is too weak. Please choose a stronger password with letters and numbers.",
       });
     }
 
-    // Check if user already exists
     if (
       findUserByIdentifier(validatedData.email) ||
       findUserByIdentifier(validatedData.mobile)
@@ -226,7 +207,6 @@ export const handleSignUp: RequestHandler = async (req, res) => {
       });
     }
 
-    // Create user
     const userId = crypto.randomUUID();
     const user: User = {
       id: userId,
@@ -238,23 +218,23 @@ export const handleSignUp: RequestHandler = async (req, res) => {
       pinCode: validatedData.pinCode,
       passwordHash: hashPassword(validatedData.password),
       isVerified: false,
-      role: "user", // Default role
+      role: "user",
       createdAt: new Date(),
     };
 
     users.set(userId, user);
 
-    // Generate OTP for mobile verification
     const otp = generateOTP();
     otpStore.set(validatedData.mobile, {
       code: otp,
       identifier: validatedData.mobile,
-      expiresAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minutes
+      expiresAt: new Date(Date.now() + 2 * 60 * 1000),
       attempts: 0,
       purpose: "registration",
     });
 
-    // Send OTP via SMS
+    // In serverless, these async calls might be cut off if not awaited properly, but express handler awaits them?
+    // Using await here ensuring sms is sent before response.
     const smsResult = await otpService.sendSMS(
       validatedData.mobile,
       otp,
@@ -264,7 +244,6 @@ export const handleSignUp: RequestHandler = async (req, res) => {
       console.warn("Failed to send SMS OTP:", smsResult.error);
     }
 
-    // Also send OTP via email as backup
     const emailResult = await otpService.sendEmail(
       validatedData.email,
       otp,
@@ -276,7 +255,7 @@ export const handleSignUp: RequestHandler = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Account created successfully. Please verify your mobile number.",
+      message: "Account created successfully. Please verify your mobile number. (Note: In this demo environment, new accounts are not persisted across restarts/redeployments)",
       requiresVerification: true,
       userId: userId,
     });
@@ -288,7 +267,6 @@ export const handleSignUp: RequestHandler = async (req, res) => {
         details: error.errors,
       });
     }
-
     console.error("Sign up error:", error);
     res.status(500).json({
       success: false,
@@ -309,7 +287,6 @@ export const handleSignIn: RequestHandler = async (req, res) => {
       });
     }
 
-    // Find user
     const user = findUserByIdentifier(validatedData.identifier);
     if (!user) {
       return res.status(401).json({
@@ -318,7 +295,6 @@ export const handleSignIn: RequestHandler = async (req, res) => {
       });
     }
 
-    // Verify password
     const passwordHash = hashPassword(validatedData.password);
     if (user.passwordHash !== passwordHash) {
       return res.status(401).json({
@@ -327,7 +303,6 @@ export const handleSignIn: RequestHandler = async (req, res) => {
       });
     }
 
-    // Check if user is verified
     if (!user.isVerified) {
       return res.status(403).json({
         success: false,
@@ -336,18 +311,21 @@ export const handleSignIn: RequestHandler = async (req, res) => {
       });
     }
 
-    // Create session
-    const token = generateToken();
+    // stateless JWT
+    const tokenPayload = {
+      userId: user.id,
+      role: user.role,
+      email: user.email
+    };
+
+    // Sign token with JWT
+    const token = jwt.sign(tokenPayload, JWT_SECRET, {
+      expiresIn: validatedData.rememberMe ? '30d' : '24h'
+    });
+
     const expiresAt = new Date(
       Date.now() + (validatedData.rememberMe ? 30 : 1) * 24 * 60 * 60 * 1000
     );
-
-    sessions.set(token, {
-      userId: user.id,
-      token,
-      expiresAt,
-      rememberMe: validatedData.rememberMe || false,
-    });
 
     res.json({
       success: true,
@@ -372,7 +350,6 @@ export const handleSignIn: RequestHandler = async (req, res) => {
         details: error.errors
       });
     }
-
     console.error("Sign in error:", error);
     res.status(500).json({
       success: false,
@@ -384,7 +361,6 @@ export const handleSignIn: RequestHandler = async (req, res) => {
 export const handleSendOTP: RequestHandler = async (req, res) => {
   try {
     const validatedData = otpSchema.parse(req.body);
-
     const { valid, type } = isValidIdentifier(validatedData.identifier);
     if (!valid) {
       return res.status(400).json({
@@ -392,8 +368,6 @@ export const handleSendOTP: RequestHandler = async (req, res) => {
         error: "Please enter a valid email or 10-digit mobile number"
       });
     }
-
-    // For login/reset, check if user exists
     if (validatedData.purpose !== 'registration') {
       const user = findUserByIdentifier(validatedData.identifier);
       if (!user) {
@@ -404,27 +378,24 @@ export const handleSendOTP: RequestHandler = async (req, res) => {
       }
     }
 
-    // Generate and store OTP
     const otp = generateOTP();
     otpStore.set(validatedData.identifier, {
       code: otp,
       identifier: validatedData.identifier,
-      expiresAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minutes
+      expiresAt: new Date(Date.now() + 2 * 60 * 1000),
       attempts: 0,
       purpose: validatedData.purpose,
     });
 
-    // Send OTP via appropriate channel
     const otpResult = await otpService.sendOTP(validatedData.identifier, otp, validatedData.purpose);
     if (!otpResult.success) {
       console.warn('Failed to send OTP:', otpResult.error);
-      // Continue anyway - OTP is still logged for development
     }
 
     res.json({
       success: true,
       message: `OTP sent to your ${type}`,
-      expiresIn: 120 // seconds
+      expiresIn: 120
     });
 
   } catch (error) {
@@ -435,7 +406,6 @@ export const handleSendOTP: RequestHandler = async (req, res) => {
         details: error.errors
       });
     }
-
     console.error("Send OTP error:", error);
     res.status(500).json({
       success: false,
@@ -448,7 +418,6 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
   try {
     const validatedData = verifyOtpSchema.parse(req.body);
 
-    // Get stored OTP
     const storedOtp = otpStore.get(validatedData.identifier);
     if (!storedOtp) {
       return res.status(400).json({
@@ -456,8 +425,6 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
         error: "No OTP found. Please request a new one."
       });
     }
-
-    // Check expiry
     if (new Date() > storedOtp.expiresAt) {
       otpStore.delete(validatedData.identifier);
       return res.status(400).json({
@@ -465,8 +432,6 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
         error: "OTP has expired. Please request a new one."
       });
     }
-
-    // Check attempts
     if (storedOtp.attempts >= 3) {
       otpStore.delete(validatedData.identifier);
       return res.status(400).json({
@@ -474,8 +439,6 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
         error: "Too many attempts. Please request a new OTP."
       });
     }
-
-    // Verify OTP
     if (storedOtp.code !== validatedData.otp) {
       storedOtp.attempts++;
       return res.status(400).json({
@@ -484,11 +447,9 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
       });
     }
 
-    // OTP verified successfully
     otpStore.delete(validatedData.identifier);
 
     if (validatedData.purpose === 'registration') {
-      // Mark user as verified
       const user = findUserByIdentifier(validatedData.identifier);
       if (user) {
         user.isVerified = true;
@@ -496,18 +457,12 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
     }
 
     if (validatedData.purpose === 'login') {
-      // Create session for OTP login
       const user = findUserByIdentifier(validatedData.identifier);
       if (user) {
-        const token = generateToken();
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 1 day
-
-        sessions.set(token, {
-          userId: user.id,
-          token,
-          expiresAt,
-          rememberMe: false,
-        });
+        // Sign JWT
+        const tokenPayload = { userId: user.id, role: user.role, email: user.email };
+        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '24h' });
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
         return res.json({
           success: true,
@@ -539,7 +494,6 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
         details: error.errors
       });
     }
-
     console.error("Verify OTP error:", error);
     res.status(500).json({
       success: false,
@@ -549,25 +503,11 @@ export const handleVerifyOTP: RequestHandler = async (req, res) => {
 };
 
 export const handleSignOut: RequestHandler = async (req, res) => {
-  try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-
-    if (token) {
-      sessions.delete(token);
-    }
-
-    res.json({
-      success: true,
-      message: "Signed out successfully"
-    });
-
-  } catch (error) {
-    console.error("Sign out error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error"
-    });
-  }
+  // Stateless, so just return success (client discards token)
+  res.json({
+    success: true,
+    message: "Signed out successfully"
+  });
 };
 
 export const handleGetProfile: RequestHandler = async (req, res) => {
@@ -581,20 +521,28 @@ export const handleGetProfile: RequestHandler = async (req, res) => {
       });
     }
 
-    const session = sessions.get(token);
-    if (!session || new Date() > session.expiresAt) {
-      if (session) sessions.delete(token);
+    // Verify JWT
+    let payload: any;
+    try {
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch (e) {
       return res.status(401).json({
         success: false,
-        error: "Invalid or expired session"
+        error: "Invalid or expired token"
       });
     }
 
-    const user = users.get(session.userId);
+    const userId = payload.userId;
+    const user = users.get(userId);
+
+    // In serverless, if registered user not found in memory (because of restart), 
+    // we can't really restore them without DB.
+    // However, for DEFAULT ADMIN, they will be found.
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: "User not found"
+        error: "User not found (or data lost in serverless restart)"
       });
     }
 
