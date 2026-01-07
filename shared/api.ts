@@ -39,6 +39,7 @@ export interface User {
   pinCode?: string;
   isVerified?: boolean;
   createdAt?: string;
+  role?: 'admin' | 'user';
 }
 
 export interface SignUpRequest {

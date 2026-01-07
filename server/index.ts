@@ -13,6 +13,7 @@ import {
 } from "./routes/auth";
 import conversionRoutes from "./routes/conversion";
 import paymentRoutes from "./routes/payment";
+import quoteRouter from "./routes/quote";
 
 export function createServer() {
   const app = express();
@@ -44,6 +45,9 @@ export function createServer() {
 
   // Payment routes
   app.use("/api/payment", paymentRoutes);
+
+  // Quote routes
+  app.use("/api/quote", quoteRouter);
 
   return app;
 }

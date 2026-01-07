@@ -5,10 +5,9 @@ import crypto from "crypto";
 const router = express.Router();
 
 // Initialize Razorpay
-// NOTE: Using test keys by default. specific keys should be in .env
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_DIYK2222222222", // Replace with valid test key if needed
-    key_secret: process.env.RAZORPAY_KEY_SECRET || "need_to_be_set_in_env",
+    key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_missing",
+    key_secret: process.env.RAZORPAY_KEY_SECRET || "missing_secret",
 });
 
 interface OrderRequest {
@@ -36,8 +35,11 @@ router.post("/order", async (req: Request, res: Response) => {
 
         res.json(order);
     } catch (error) {
-        console.error("Razorpay Order Error:", error);
-        res.status(500).json({ error: "Failed to create order" });
+        console.error("Razorpay Order Error Details:", error);
+        res.status(500).json({
+            error: "Failed to create order",
+            details: error instanceof Error ? error.message : "Unknown error"
+        });
     }
 });
 

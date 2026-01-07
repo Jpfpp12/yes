@@ -10,7 +10,11 @@ interface ThreeDViewerProps {
   fileName: string;
   className?: string;
   isPreview?: boolean;
+  onExpand?: () => void;
 }
+
+// ... imports ...
+import { Maximize2, RotateCw, Move, MousePointer2 } from "lucide-react";
 
 function Loader() {
   const { progress } = useProgress();
@@ -49,7 +53,7 @@ function Model({ fileUrl, fileName }: { fileUrl: string; fileName: string }) {
           // Clear and add PBR shaded mesh
           meshRef.current.clear();
           const mat = new THREE.MeshPhysicalMaterial({
-            color: "#444444",
+            color: "#FF5722",
             metalness: 0.1,
             roughness: 0.6,
           });
@@ -64,7 +68,7 @@ function Model({ fileUrl, fileName }: { fileUrl: string; fileName: string }) {
             geometry.translate(-center.x, -center.y, -center.z);
             const size = box.getSize(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
-            const scale = 2 / maxDim;
+            const scale = 3.5 / maxDim;
             geometry.scale(scale, scale, scale);
           }
         }
@@ -89,7 +93,7 @@ function Model({ fileUrl, fileName }: { fileUrl: string; fileName: string }) {
 
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
-          const scale = 2 / maxDim;
+          const scale = 3.5 / maxDim;
           gltf.scene.scale.setScalar(scale);
         }
       }
@@ -122,6 +126,7 @@ export default function ThreeDViewer({
   fileName,
   className,
   isPreview = false,
+  onExpand,
 }: ThreeDViewerProps) {
   const supportedFormats = ["stl", "gltf", "glb"];
   const fileExtension = fileName.split(".").pop()?.toLowerCase();
@@ -146,7 +151,19 @@ export default function ThreeDViewer({
   }
 
   return (
-    <div className={`bg-[#f5f5f5] ${className}`}>
+    <div className={`relative bg-[#f5f5f5] ${className} group`}>
+      {onExpand && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
+          className="absolute top-4 right-4 z-20 p-2 bg-white/90 backdrop-blur rounded-md shadow-sm border border-gray-200 hover:bg-white text-gray-700 transition-all hover:scale-105 active:scale-95"
+          title="Fullscreen"
+        >
+          <Maximize2 className="w-5 h-5" />
+        </button>
+      )}
       <Canvas
         shadows
         camera={{ position: [4, 4, 4], fov: 45 }}
@@ -188,9 +205,9 @@ export default function ThreeDViewer({
         <OrbitControls
           enableDamping
           dampingFactor={0.08}
-          minDistance={1}
-          maxDistance={10}
-          enablePan={false}
+          minDistance={0}
+          maxDistance={Infinity}
+          enablePan={true}
           enableZoom={true}
           enableRotate={true}
         />
