@@ -81,14 +81,40 @@ export function calculateEstimatedCost(
   const materialCost = weight * pricePerGram;
   const finishMultiplier =
     FINISHES.find((f) => f.value === finish)?.priceMultiplier ?? 1;
-  const calculatedPrice = materialCost * finishMultiplier * quantity;
+
+  let calculatedPrice = materialCost * finishMultiplier * quantity;
+
+  // --- Discount Logic ---
+  // 1. Minimum Price Validation
   const minimumPriceSettings = localStorage.getItem("minimumPriceSettings");
-  const settings = minimumPriceSettings
+  const minSettings = minimumPriceSettings
     ? JSON.parse(minimumPriceSettings)
     : { enabled: true, amount: 200 };
-  return Math.round(
-    settings.enabled
-      ? Math.max(calculatedPrice, settings.amount)
-      : calculatedPrice,
-  );
+
+  if (minSettings.enabled) {
+    calculatedPrice = Math.max(calculatedPrice, minSettings.amount);
+  }
+
+  // 2. Volume/Quantity Discount Slabs
+  // Calculate total volume for this line item to verify discount eligibility
+  // (In a real app, this might sum across all cart items, but per-item volume discount is a good start)
+  const totalVolume = volume * quantity;
+
+  const volumeDiscountSlabs = localStorage.getItem("volumeDiscountSlabs");
+  if (volumeDiscountSlabs) {
+    const slabs = JSON.parse(volumeDiscountSlabs);
+    // Find the highest applicable discount slab
+    // Sort desc by minVolume just in case
+    const sortedSlabs = slabs.sort((a: any, b: any) => b.minVolume - a.minVolume);
+
+    for (const slab of sortedSlabs) {
+      if (totalVolume >= slab.minVolume) {
+        const discountAmount = calculatedPrice * (slab.discount / 100);
+        calculatedPrice -= discountAmount;
+        break; // Apply only the highest tier
+      }
+    }
+  }
+
+  return Math.round(calculatedPrice);
 }
