@@ -59,7 +59,7 @@ export function useFileUpload() {
   };
 
   const handleFileUpload = async (files: FileList) => {
-    const newFiles: UploadedFile[] = [];
+    // Process each file
     for (const file of Array.from(files)) {
       const allowedTypes = [
         ".stl",
@@ -72,153 +72,132 @@ export function useFileUpload() {
         ".3mf",
         ".ply",
       ];
-      const fileExtension = "." + file.name.split(".").pop()?.toLowerCase();
+      const rawExtension = file.name.split(".").pop()?.toLowerCase();
+      const fileExtension = "." + rawExtension;
+
       if (!allowedTypes.includes(fileExtension)) continue;
-      const formData = new FormData();
-      formData.append("file", file);
-      try {
-        const extension = fileExtension.toLowerCase();
-        const isClientSupported = [".stl", ".gltf", ".glb"].includes(extension);
-        let localPreviewUrl: string | undefined;
 
-        if (isClientSupported) {
-          localPreviewUrl = URL.createObjectURL(file);
-        }
+      // 1. Create optimistic entry immediately
+      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const isClientSupported = ["stl", "gltf", "glb"].includes(rawExtension || "");
 
-        const response = await fetch("/api/conversion/upload-3d", {
-          method: "POST",
-          body: formData,
-        });
+      // Create local preview URL immediately if supported
+      let localPreviewUrl: string | undefined;
+      let initialFileType: "stl" | "gltf" | "unsupported" = "unsupported";
 
-        if (!response.ok) throw new Error("Upload failed");
-        const uploadResult = await response.json();
+      if (isClientSupported) {
+        localPreviewUrl = URL.createObjectURL(file);
+        // Map extension to fileType
+        if (rawExtension === "stl") initialFileType = "stl";
+        else if (["gltf", "glb"].includes(rawExtension || "")) initialFileType = "gltf";
+      }
 
-        // Use local URL if avaliable (fixes Netlify/Vercel preview), otherwise use server path
-        const effectivePreviewPath = localPreviewUrl || uploadResult.previewPath;
+      // Generate a temporary thumbnail (placeholder) locally
+      const initialThumbnail = await generateThumbnail(file, localPreviewUrl, initialFileType);
 
-        let thumbUrl = await generateThumbnail(
-          file,
-          effectivePreviewPath,
-          uploadResult.fileType,
-        );
+      const newFile: UploadedFile = {
+        id,
+        file,
+        thumbnail: initialThumbnail,
+        previewPath: localPreviewUrl, // This is available INSTANTLY
+        fileType: initialFileType,
+        printType: "sla",
+        material: "abs_alike",
+        finish: "standard",
+        quantity: 1,
+        volume: 0,
+        weight: 0,
+        volumeMethod: "estimated",
+        estimatedCost: 100, // Placeholder cost
+        isCalculatingVolume: true,
+      };
+
+      // Update UI immediately
+      setUploadedFiles((prev) => [...prev, newFile]);
+
+      // 2. Perform background processing (Upload & Volume Calc)
+      (async () => {
         try {
-          if (thumbUrl.startsWith("data:image")) {
-            const saveRes = await fetch("/api/conversion/save-thumbnail", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                image: thumbUrl,
-                source: uploadResult.originalPath,
-              }),
-            });
-            if (saveRes.ok) {
-              const saved = await saveRes.json();
-              if (saved && saved.url) thumbUrl = saved.url;
+          // Upload for server-side processing if needed (e.g. for non-STL conversion or volume calc validation)
+          const formData = new FormData();
+          formData.append("file", file);
+
+          // We can proceed to calculate volume even while upload is happening, 
+          // but let's stick to the flow: Upload -> Info
+
+          const response = await fetch("/api/conversion/upload-3d", {
+            method: "POST",
+            body: formData,
+          });
+
+          let serverPath = undefined;
+
+          if (response.ok) {
+            const uploadResult = await response.json();
+            serverPath = uploadResult.originalPath;
+
+            // If we didn't have a local preview (e.g. server converted it), use the server one
+            // But for STL/GLTF we stick to local for speed/reliability
+
+            // Attempt to generate a better thumbnail if possible via server or re-gen
+            // (optional - for now sticking to local generation is safer for visual preview)
+
+            // If the file was converted (e.g. STEP -> GLTF), we should update the previewPath
+            if (uploadResult.fileType === 'gltf' && !localPreviewUrl) {
+              // This is where we might still have issues on Netlify if the path is transient
+              // But at least we have a fallback
+              setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, previewPath: uploadResult.previewPath, fileType: "gltf" } : f));
+            }
+
+            if (uploadResult.success && uploadResult.fileType) {
+              setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, fileType: uploadResult.fileType as any } : f));
             }
           }
-        } catch { }
-        const id =
-          Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        newFiles.push({
-          id,
-          file,
-          thumbnail: thumbUrl,
-          previewPath: effectivePreviewPath,
-          fileType: uploadResult.fileType,
-          printType: "sla",
-          material: "abs_alike",
-          finish: "standard",
-          quantity: 1,
-          volume: 0,
-          weight: 0,
-          volumeMethod: "estimated",
-          estimatedCost: 100,
-          isCalculatingVolume: true,
-          serverPath: uploadResult.originalPath,
-        });
-      } catch {
-        const thumbnail = await generateThumbnail(file);
-        const id =
-          Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        newFiles.push({
-          id,
-          file,
-          thumbnail,
-          fileType: "unsupported",
-          printType: "sla",
-          material: "abs_alike",
-          finish: "standard",
-          quantity: 1,
-          volume: 0,
-          weight: 0,
-          volumeMethod: "estimated",
-          estimatedCost: 100,
-          isCalculatingVolume: true,
-        });
-      }
-    }
-    setUploadedFiles((prev) => [...prev, ...newFiles]);
 
-    newFiles.forEach(async (fileObj) => {
-      try {
-        const { volume, method } = await calculateVolumeFromAPI(fileObj.file);
-        const weight = calculateWeight(
-          volume,
-          (fileObj.printType as PrintType) || "sla",
-          fileObj.material,
-        );
-        setUploadedFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileObj.id
-              ? {
-                ...f,
-                volume,
-                weight,
-                volumeMethod: method,
-                isCalculatingVolume: false,
-                estimatedCost: calculateEstimatedCost(
-                  volume,
-                  weight,
-                  (f.printType as PrintType) || "sla",
-                  f.material,
-                  f.finish,
-                  f.quantity,
-                ),
-              }
-              : f,
-          ),
-        );
-      } catch {
-        const fallbackVolume = (fileObj.file.size / 1024) * 0.045;
-        const fallbackWeight = calculateWeight(
-          fallbackVolume,
-          (fileObj.printType as PrintType) || "sla",
-          fileObj.material,
-        );
-        setUploadedFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileObj.id
-              ? {
-                ...f,
-                isCalculatingVolume: false,
-                volume: fallbackVolume,
-                weight: fallbackWeight,
-                volumeMethod: "estimated",
-                estimatedCost: calculateEstimatedCost(
-                  fallbackVolume,
-                  fallbackWeight,
-                  (f.printType as PrintType) || "sla",
-                  f.material,
-                  f.finish,
-                  f.quantity,
-                ),
-              }
-              : f,
-          ),
-        );
-      }
-    });
+          // Calculate Volume
+          const { volume, method } = await calculateVolumeFromAPI(file);
+
+          // Calculate final attributes
+          setUploadedFiles(prev => prev.map(f => {
+            if (f.id !== id) return f;
+
+            const weight = calculateWeight(volume, f.printType as PrintType, f.material);
+            const cost = calculateEstimatedCost(volume, weight, f.printType as PrintType, f.material, f.finish, f.quantity);
+
+            return {
+              ...f,
+              volume,
+              weight,
+              volumeMethod: method,
+              estimatedCost: cost,
+              isCalculatingVolume: false,
+              serverPath
+            };
+          }));
+
+        } catch (error) {
+          console.error("Background processing failed", error);
+          // Fallback estimation
+          const fallbackVolume = (file.size / 1024) * 0.045;
+          setUploadedFiles(prev => prev.map(f => {
+            if (f.id !== id) return f;
+            const weight = calculateWeight(fallbackVolume, f.printType as PrintType, f.material);
+            return {
+              ...f,
+              volume: fallbackVolume,
+              weight,
+              volumeMethod: 'estimated',
+              estimatedCost: calculateEstimatedCost(fallbackVolume, weight, f.printType as PrintType, f.material, f.finish, f.quantity),
+              isCalculatingVolume: false
+            }
+          }));
+        }
+      })();
+    }
+    // End Loop
   };
+
+
 
   const removeFile = (id: string) => {
     setUploadedFiles((prev) => prev.filter((file) => file.id !== id));
