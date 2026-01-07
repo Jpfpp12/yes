@@ -48,7 +48,7 @@ export default function Quote() {
     const { user, isAuthenticated } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
-    const { uploadedFiles, handleFileUpload, updateFileProperty, removeFile } = useFileUpload();
+    const { uploadedFiles, handleFileUpload, updateFileProperty, removeFile, updateGlobalFileSettings } = useFileUpload();
 
     // Global settings for the quote page style
     const [selectedMaterial, setSelectedMaterial] = useState("pla");
@@ -82,18 +82,12 @@ export default function Quote() {
 
     // Effect: Update all files when global settings change
     useEffect(() => {
+        if (uploadedFiles.length === 0) return;
+
         const matConfig = MATERIAL_MAPPING[selectedMaterial];
         const finish = QUALITY_MAPPING[selectedQuality];
 
-        uploadedFiles.forEach(file => {
-            if (file.printType !== matConfig.printType || file.material !== matConfig.material) {
-                updateFileProperty(file.id, "printType", matConfig.printType);
-                setTimeout(() => updateFileProperty(file.id, "material", matConfig.material), 0);
-            }
-            if (file.finish !== finish) {
-                updateFileProperty(file.id, "finish", finish);
-            }
-        });
+        updateGlobalFileSettings(matConfig.printType, matConfig.material, finish);
     }, [selectedMaterial, selectedQuality, uploadedFiles.length]);
 
     // Effect: Auto-select latest file

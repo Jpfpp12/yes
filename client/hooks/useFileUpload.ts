@@ -345,6 +345,43 @@ export function useFileUpload() {
     );
   };
 
+  const updateGlobalFileSettings = (
+    newPrintType: string,
+    newMaterial: string,
+    newFinish: string
+  ) => {
+    setUploadedFiles((prev) =>
+      prev.map((file) => {
+        // Only update if changes are needed to avoid unnecessary recalculations if checked strictly
+        // But for batch, we just overwrite to ensure consistency
+
+        const weight = calculateWeight(
+          file.volume,
+          newPrintType as PrintType,
+          newMaterial
+        );
+
+        const estimatedCost = calculateEstimatedCost(
+          file.volume,
+          weight,
+          newPrintType as PrintType,
+          newMaterial,
+          newFinish,
+          file.quantity
+        );
+
+        return {
+          ...file,
+          printType: newPrintType,
+          material: newMaterial,
+          finish: newFinish,
+          weight,
+          estimatedCost
+        };
+      })
+    );
+  };
+
   return {
     uploadedFiles,
     setUploadedFiles,
@@ -352,5 +389,6 @@ export function useFileUpload() {
     removeFile,
     updateFileProperty,
     recalculateAllCosts,
+    updateGlobalFileSettings,
   };
 }
