@@ -710,6 +710,30 @@ export default function Quote() {
                     </div>
                 </DialogContent>
             </Dialog >
+            {/* Fullscreen Viewer Dialog */}
+            <Dialog open={showFullscreenViewer} onOpenChange={setShowFullscreenViewer}>
+                <DialogContent className="max-w-[95vw] h-[90vh] p-0 border-none bg-black/95">
+                    <div className="relative w-full h-full">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-4 right-4 z-50 text-white hover:bg-white/20 rounded-full"
+                            onClick={() => setShowFullscreenViewer(false)}
+                        >
+                            <X className="w-6 h-6" />
+                        </Button>
+                        {selectedFile && (
+                            <Suspense fallback={<div className="flex items-center justify-center w-full h-full"><div className="w-8 h-8 border-4 border-gray-200 border-t-[#FF5722] rounded-full animate-spin"></div></div>}>
+                                <ThreeDViewer
+                                    fileUrl={selectedFile.previewPath || ""}
+                                    fileName={selectedFile.file.name}
+                                    className="w-full h-full"
+                                />
+                            </Suspense>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div >
     );
 }
