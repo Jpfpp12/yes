@@ -9,4 +9,4 @@ export const config = {
     },
 };
 
-export default serverless(app);
+export const handler = serverless(app);

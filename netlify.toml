@@ -1,6 +1,6 @@
 [build]
   command = "npm run build:client"
-  functions = "netlify/functions"
+  functions = "api"
   publish = "dist/spa"
 
 
