@@ -8,7 +8,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "./hooks/useAuth";
+import { AuthProvider, ProtectedRoute } from "./hooks/useAuth";
 
 // Lazy load pages to reduce initial bundle size
 import Index from "./pages/Index";
@@ -39,7 +39,11 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/signup" element={<SignUp />} />
               <Route path="/signin" element={<SignIn />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin" element={
+                <ProtectedRoute>
+                  <Admin />
+                </ProtectedRoute>
+              } />
               <Route path="/client-quotations" element={<ClientQuotations />} />
               <Route path="/quote" element={<Quote />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
