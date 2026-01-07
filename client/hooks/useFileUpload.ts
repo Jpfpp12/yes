@@ -29,30 +29,114 @@ export interface UploadedFile {
 export function useFileUpload() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const calculateVolumeFromAPI = async (
+  // Client-side STL Parser to avoid server limits
+  const parseSTLVolumeClient = async (file: File): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (b) => {
+        const buffer = b.target?.result as ArrayBuffer;
+        const view = new DataView(buffer);
+
+        try {
+          // Binary STL check (80 bytes header + 4 bytes count)
+          if (buffer.byteLength < 84) throw new Error("File too small");
+
+          const triangleCount = view.getUint32(80, true);
+          const expectedSize = 84 + (triangleCount * 50);
+
+          if (buffer.byteLength !== expectedSize) {
+            // Basic fallback for ASCII or corrupt files: return 0 to trigger estimation
+            // Parsing ASCII client-side can be slow/complex, better to estimate
+            resolve(0);
+            return;
+          }
+
+          let totalVolume = 0;
+          let offset = 84;
+
+          for (let i = 0; i < triangleCount; i++) {
+            // Normal (12 bytes) - skip
+
+            // Vertices (12 bytes per vertex)
+            const v1x = view.getFloat32(offset + 12, true);
+            const v1y = view.getFloat32(offset + 16, true);
+            const v1z = view.getFloat32(offset + 20, true);
+
+            const v2x = view.getFloat32(offset + 24, true);
+            const v2y = view.getFloat32(offset + 28, true);
+            const v2z = view.getFloat32(offset + 32, true);
+
+            const v3x = view.getFloat32(offset + 36, true);
+            const v3y = view.getFloat32(offset + 40, true);
+            const v3z = view.getFloat32(offset + 44, true);
+
+            // Signed volume of tetrahedron
+            // v3 . (v1 x v2) / 6  (or equivalent cross product logic)
+            // Using: v1 . (v2 x v3) / 6
+            const crossX = v2y * v3z - v2z * v3y;
+            const crossY = v2z * v3x - v2x * v3z;
+            const crossZ = v2x * v3y - v2y * v3x;
+
+            totalVolume += v1x * crossX + v1y * crossY + v1z * crossZ;
+
+            offset += 50; // 12 normal + 36 vertices + 2 attribute
+          }
+
+          resolve(Math.abs(totalVolume / 6000)); // /6 for tetra, /1000 for mm3->cm3
+        } catch (e) {
+          resolve(0);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  const calculateVolume = async (
     file: File,
   ): Promise<{ volume: number; method: "calculated" | "estimated" }> => {
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/calculate-volume", {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok)
-        throw new Error(`HTTP error! status: ${response.status}`);
-      const data: VolumeCalculationResponse = await response.json();
-      if (!data.success)
-        throw new Error(data.message || "Volume calculation failed");
-      const volumeInCm3 = data.volume / 1000;
-      return {
-        volume: Math.round(volumeInCm3 * 100) / 100,
-        method: data.method,
-      };
+      const ext = file.name.split('.').pop()?.toLowerCase();
+
+      // 1. Try Client-side Exact Calculation for STL
+      if (ext === 'stl') {
+        const vol = await parseSTLVolumeClient(file);
+        if (vol > 0) {
+          return { volume: Math.round(vol * 100) / 100, method: "calculated" };
+        }
+      }
+
+      // 2. Try Server-side for others (if small enough) or mapped formats
+      // But server uses 6MB limit. If file > 4MB, skip server to be safe
+      if (file.size < 4 * 1024 * 1024 && ['obj', '3mf'].includes(ext || '')) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch("/api/calculate-volume", {
+          method: "POST",
+          body: formData,
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.volume) {
+            return { volume: data.volume / 1000, method: data.method };
+          }
+        }
+      }
+
+      throw new Error("Fallback to estimation");
     } catch {
-      const estimatedVolumeInCm3 = (file.size / 1024) * 0.045;
+      // 3. Fallback Estimation based on file size
+      // simple heuristic: 1MB STL ~= 45 cm3 (very rough, dependent on density/resolution)
+      // improved heuristic: size * factor
+      const estimatedVolumeInCm3 = (file.size / 1024 / 1024) * 15; // 15 cm3 per MB is a safer conservative estimate? 
+      // Actually typically 1MB binary STL is ~15-20k triangles. Surface area correlate... 
+      // Let's stick to the previous factor but ensure it's reasonable.
+      // previous was (file.size / 1024) * 0.045 = file_bytes * 0.0000439 => 1MB = 46 cm3.
+      // This is acceptable for estimation.
+
+      const estimatedVolumeInCm3Old = (file.size / 1024) * 0.045;
+
       return {
-        volume: Math.round(estimatedVolumeInCm3 * 100) / 100,
+        volume: Math.round(estimatedVolumeInCm3Old * 100) / 100,
         method: "estimated",
       };
     }
@@ -155,7 +239,7 @@ export function useFileUpload() {
           }
 
           // Calculate Volume
-          const { volume, method } = await calculateVolumeFromAPI(file);
+          const { volume, method } = await calculateVolume(file);
 
           // Calculate final attributes
           setUploadedFiles(prev => prev.map(f => {
