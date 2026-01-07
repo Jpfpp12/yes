@@ -18,3 +18,7 @@
   from = "/*"
   status = 200
   to = "/index.html"
+
+[build.environment]
+  NPM_FLAGS = "--no-frozen-lockfile"
+  PNPM_FLAGS = "--no-frozen-lockfile"
