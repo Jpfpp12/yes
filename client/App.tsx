@@ -12,11 +12,11 @@ import { AuthProvider, ProtectedRoute } from "./hooks/useAuth";
 
 // Lazy load pages to reduce initial bundle size
 import Index from "./pages/Index";
+import Quote from "./pages/Quote";
 const SignUp = lazy(() => import("./pages/SignUp"));
 const SignIn = lazy(() => import("./pages/SignIn"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ClientQuotations = lazy(() => import("./pages/ClientQuotations"));
-const Quote = lazy(() => import("./pages/Quote"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();

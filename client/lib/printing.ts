@@ -68,6 +68,13 @@ export function calculateWeight(
   return Math.round(volumeCm3 * density * 100) / 100;
 }
 
+export interface CostBreakdown {
+  finalCost: number;
+  baseCost: number;
+  discountAmount: number;
+  discountLabel?: string;
+}
+
 export function calculateEstimatedCost(
   volume: number,
   weight: number,
@@ -75,14 +82,17 @@ export function calculateEstimatedCost(
   material: string,
   finish: string,
   quantity: number,
-): number {
+): CostBreakdown {
   const materialData = MATERIALS[printType]?.find((m) => m.value === material);
   const pricePerGram = materialData?.pricePerGram ?? 12;
   const materialCost = weight * pricePerGram;
   const finishMultiplier =
     FINISHES.find((f) => f.value === finish)?.priceMultiplier ?? 1;
 
-  let calculatedPrice = materialCost * finishMultiplier * quantity;
+  const basePrice = Math.round(materialCost * finishMultiplier * quantity);
+  let calculatedPrice = basePrice;
+  const discountAmount = 0;
+  const discountLabel = undefined;
 
   // --- Discount Logic ---
   // 1. Minimum Price Validation
@@ -91,42 +101,17 @@ export function calculateEstimatedCost(
     ? JSON.parse(minimumPriceSettings)
     : { enabled: true, amount: 200 };
 
-  if (minSettings.enabled) {
-    calculatedPrice = Math.max(calculatedPrice, minSettings.amount);
+  if (minSettings.enabled && calculatedPrice < minSettings.amount) {
+    calculatedPrice = minSettings.amount;
   }
 
-  // 2. Volume/Quantity Discount Slabs
-  // Calculate total volume for this line item to verify discount eligibility
-  // (In a real app, this might sum across all cart items, but per-item volume discount is a good start)
-  const totalVolume = volume * quantity;
+  // 2. Volume Discount is now handled globally in Quote.tsx for the entire cart.
+  // We return the per-item cost without volume discount here to avoid double-counting.
 
-  let slabs: any[] = [];
-  const volumeDiscountSlabs = localStorage.getItem("volumeDiscountSlabs");
-
-  if (volumeDiscountSlabs) {
-    slabs = JSON.parse(volumeDiscountSlabs);
-  } else {
-    // Default slabs (same as Admin.tsx defaults)
-    slabs = [
-      { id: "1", minVolume: 2000, discount: 5, label: "Large Order" },
-      { id: "2", minVolume: 4000, discount: 10, label: "Bulk Order" },
-      { id: "3", minVolume: 8000, discount: 15, label: "Enterprise Order" },
-    ];
-  }
-
-  if (slabs.length > 0) {
-    // Find the highest applicable discount slab
-    // Sort desc by minVolume just in case
-    const sortedSlabs = slabs.sort((a: any, b: any) => b.minVolume - a.minVolume);
-
-    for (const slab of sortedSlabs) {
-      if (totalVolume >= slab.minVolume) {
-        const discountAmount = calculatedPrice * (slab.discount / 100);
-        calculatedPrice -= discountAmount;
-        break; // Apply only the highest tier
-      }
-    }
-  }
-
-  return Math.round(calculatedPrice);
+  return {
+    finalCost: Math.round(calculatedPrice),
+    baseCost: basePrice,
+    discountAmount,
+    discountLabel
+  };
 }

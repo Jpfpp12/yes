@@ -5,6 +5,7 @@ import {
   calculateWeight,
   MATERIALS,
   type PrintType,
+  type CostBreakdown,
 } from "@/lib/printing";
 import type { VolumeCalculationResponse } from "@shared/api";
 
@@ -22,6 +23,7 @@ export interface UploadedFile {
   weight: number;
   volumeMethod: "calculated" | "estimated";
   estimatedCost: number;
+  costDetails?: CostBreakdown;
   isCalculatingVolume?: boolean;
   serverPath?: string;
 }
@@ -246,14 +248,15 @@ export function useFileUpload() {
             if (f.id !== id) return f;
 
             const weight = calculateWeight(volume, f.printType as PrintType, f.material);
-            const cost = calculateEstimatedCost(volume, weight, f.printType as PrintType, f.material, f.finish, f.quantity);
+            const costBreakdown = calculateEstimatedCost(volume, weight, f.printType as PrintType, f.material, f.finish, f.quantity);
 
             return {
               ...f,
               volume,
               weight,
               volumeMethod: method,
-              estimatedCost: cost,
+              estimatedCost: costBreakdown.finalCost,
+              costDetails: costBreakdown,
               isCalculatingVolume: false,
               serverPath
             };
@@ -266,14 +269,16 @@ export function useFileUpload() {
           setUploadedFiles(prev => prev.map(f => {
             if (f.id !== id) return f;
             const weight = calculateWeight(fallbackVolume, f.printType as PrintType, f.material);
+            const costBreakdown = calculateEstimatedCost(fallbackVolume, weight, f.printType as PrintType, f.material, f.finish, f.quantity);
             return {
               ...f,
               volume: fallbackVolume,
               weight,
               volumeMethod: 'estimated',
-              estimatedCost: calculateEstimatedCost(fallbackVolume, weight, f.printType as PrintType, f.material, f.finish, f.quantity),
+              estimatedCost: costBreakdown.finalCost,
+              costDetails: costBreakdown,
               isCalculatingVolume: false
-            }
+            };
           }));
         }
       })();
@@ -315,7 +320,7 @@ export function useFileUpload() {
             property as string,
           )
         ) {
-          updated.estimatedCost = calculateEstimatedCost(
+          const costBreakdown = calculateEstimatedCost(
             updated.volume,
             updated.weight,
             (property === "printType" ? value : updated.printType) as PrintType,
@@ -323,6 +328,8 @@ export function useFileUpload() {
             property === "finish" ? value : updated.finish,
             property === "quantity" ? value : updated.quantity,
           );
+          updated.estimatedCost = costBreakdown.finalCost;
+          updated.costDetails = costBreakdown;
         }
         return updated;
       }),
@@ -331,17 +338,21 @@ export function useFileUpload() {
 
   const recalculateAllCosts = () => {
     setUploadedFiles((prev) =>
-      prev.map((file) => ({
-        ...file,
-        estimatedCost: calculateEstimatedCost(
+      prev.map((file) => {
+        const costBreakdown = calculateEstimatedCost(
           file.volume,
           file.weight,
           (file.printType as PrintType) || "sla",
           file.material,
           file.finish,
           file.quantity,
-        ),
-      })),
+        );
+        return {
+          ...file,
+          estimatedCost: costBreakdown.finalCost,
+          costDetails: costBreakdown
+        };
+      }),
     );
   };
 
@@ -361,7 +372,7 @@ export function useFileUpload() {
           newMaterial
         );
 
-        const estimatedCost = calculateEstimatedCost(
+        const costBreakdown = calculateEstimatedCost(
           file.volume,
           weight,
           newPrintType as PrintType,
@@ -376,7 +387,8 @@ export function useFileUpload() {
           material: newMaterial,
           finish: newFinish,
           weight,
-          estimatedCost
+          estimatedCost: costBreakdown.finalCost,
+          costDetails: costBreakdown
         };
       })
     );
