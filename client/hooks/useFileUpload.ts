@@ -77,15 +77,28 @@ export function useFileUpload() {
       const formData = new FormData();
       formData.append("file", file);
       try {
+        const extension = fileExtension.toLowerCase();
+        const isClientSupported = [".stl", ".gltf", ".glb"].includes(extension);
+        let localPreviewUrl: string | undefined;
+
+        if (isClientSupported) {
+          localPreviewUrl = URL.createObjectURL(file);
+        }
+
         const response = await fetch("/api/conversion/upload-3d", {
           method: "POST",
           body: formData,
         });
+
         if (!response.ok) throw new Error("Upload failed");
         const uploadResult = await response.json();
+
+        // Use local URL if avaliable (fixes Netlify/Vercel preview), otherwise use server path
+        const effectivePreviewPath = localPreviewUrl || uploadResult.previewPath;
+
         let thumbUrl = await generateThumbnail(
           file,
-          uploadResult.previewPath,
+          effectivePreviewPath,
           uploadResult.fileType,
         );
         try {
@@ -103,14 +116,14 @@ export function useFileUpload() {
               if (saved && saved.url) thumbUrl = saved.url;
             }
           }
-        } catch {}
+        } catch { }
         const id =
           Date.now().toString() + Math.random().toString(36).substr(2, 9);
         newFiles.push({
           id,
           file,
           thumbnail: thumbUrl,
-          previewPath: uploadResult.previewPath,
+          previewPath: effectivePreviewPath,
           fileType: uploadResult.fileType,
           printType: "sla",
           material: "abs_alike",
@@ -158,20 +171,20 @@ export function useFileUpload() {
           prev.map((f) =>
             f.id === fileObj.id
               ? {
-                  ...f,
+                ...f,
+                volume,
+                weight,
+                volumeMethod: method,
+                isCalculatingVolume: false,
+                estimatedCost: calculateEstimatedCost(
                   volume,
                   weight,
-                  volumeMethod: method,
-                  isCalculatingVolume: false,
-                  estimatedCost: calculateEstimatedCost(
-                    volume,
-                    weight,
-                    (f.printType as PrintType) || "sla",
-                    f.material,
-                    f.finish,
-                    f.quantity,
-                  ),
-                }
+                  (f.printType as PrintType) || "sla",
+                  f.material,
+                  f.finish,
+                  f.quantity,
+                ),
+              }
               : f,
           ),
         );
@@ -186,20 +199,20 @@ export function useFileUpload() {
           prev.map((f) =>
             f.id === fileObj.id
               ? {
-                  ...f,
-                  isCalculatingVolume: false,
-                  volume: fallbackVolume,
-                  weight: fallbackWeight,
-                  volumeMethod: "estimated",
-                  estimatedCost: calculateEstimatedCost(
-                    fallbackVolume,
-                    fallbackWeight,
-                    (f.printType as PrintType) || "sla",
-                    f.material,
-                    f.finish,
-                    f.quantity,
-                  ),
-                }
+                ...f,
+                isCalculatingVolume: false,
+                volume: fallbackVolume,
+                weight: fallbackWeight,
+                volumeMethod: "estimated",
+                estimatedCost: calculateEstimatedCost(
+                  fallbackVolume,
+                  fallbackWeight,
+                  (f.printType as PrintType) || "sla",
+                  f.material,
+                  f.finish,
+                  f.quantity,
+                ),
+              }
               : f,
           ),
         );
