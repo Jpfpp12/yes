@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, UploadCloud, Settings, Download, Mail, Eye, MousePointer2, Move, Search, X } from "lucide-react";
 import { useFileUpload, UploadedFile } from "@/hooks/useFileUpload";
 import FileUploadArea from "@/components/FileUploadArea";
 import FileTable from "@/components/FileTable";
-import ThreeDViewer from "@/components/ThreeDViewer";
+// import ThreeDViewer from "@/components/ThreeDViewer";
+const ThreeDViewer = lazy(() => import("@/components/ThreeDViewer"));
 import { createRazorpayOrder, loadRazorpay } from "@/utils/razorpay";
 import { generateQuotePDF } from "@/utils/pdfGenerator";
 import { useAuth } from "@/hooks/useAuth";
@@ -351,12 +352,14 @@ export default function Quote() {
                                 {(selectedFile && (selectedFile.previewPath || selectedFile.fileType === "stl" || selectedFile.fileType === "gltf" || (selectedFile.fileType as string) === "glb")) ? (
                                     <>
                                         <div className="absolute inset-0">
-                                            <ThreeDViewer
-                                                fileUrl={selectedFile.previewPath || ""}
-                                                fileName={selectedFile.file.name}
-                                                className="w-full h-full"
-                                                onExpand={() => setShowFullscreenViewer(true)}
-                                            />
+                                            <Suspense fallback={<div className="flex items-center justify-center w-full h-full"><div className="w-8 h-8 border-4 border-gray-200 border-t-[#FF5722] rounded-full animate-spin"></div></div>}>
+                                                <ThreeDViewer
+                                                    fileUrl={selectedFile.previewPath || ""}
+                                                    fileName={selectedFile.file.name}
+                                                    className="w-full h-full"
+                                                    onExpand={() => setShowFullscreenViewer(true)}
+                                                />
+                                            </Suspense>
                                         </div>
                                         <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-6 pointer-events-none">
                                             <div className="bg-white/80 backdrop-blur px-4 py-2 rounded-full shadow-sm flex items-center gap-6 text-[10px] font-mono uppercase tracking-widest text-gray-600 border border-gray-200">

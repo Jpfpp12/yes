@@ -15,6 +15,14 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: "dist/spa",
+    sourcemap: false, // Protected: Disable source maps
+    minify: "terser", // Protected: Use terser for better minification
+    terserOptions: {
+      compress: {
+        drop_console: true, // Protected: Remove console logs
+        drop_debugger: true, // Protected: Remove debugger statements
+      },
+    },
   },
   plugins: [react(), expressPlugin()],
   resolve: {
