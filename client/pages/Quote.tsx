@@ -348,7 +348,7 @@ export default function Quote() {
                             </div>
 
                             <div className="flex-1 bg-gray-50 relative overflow-hidden ring-1 ring-black/5">
-                                {(selectedFile && (selectedFile.fileType === "stl" || selectedFile.fileType === "gltf" || (selectedFile.fileType as string) === "glb")) ? (
+                                {(selectedFile && (selectedFile.previewPath || selectedFile.fileType === "stl" || selectedFile.fileType === "gltf" || (selectedFile.fileType as string) === "glb")) ? (
                                     <>
                                         <div className="absolute inset-0">
                                             <ThreeDViewer
