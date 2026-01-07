@@ -4,19 +4,30 @@ import path from "path";
 import { promises as fs } from "fs";
 import { cadConversionService } from "../services/cadConversionService.js";
 
+import os from "os";
+
 const router = express.Router();
 
-const thumbnailsDir = path.join(process.cwd(), "uploads", "thumbnails");
-(async () => {
+// Use /tmp for serverless environments (like Netlify)
+const uploadDir = path.join(os.tmpdir(), "uploads");
+const thumbnailsDir = path.join(uploadDir, "thumbnails");
+
+// Ensure directories exist (lazy creation)
+const ensureDirs = async () => {
   try {
+    await fs.mkdir(uploadDir, { recursive: true });
     await fs.mkdir(thumbnailsDir, { recursive: true });
-  } catch {}
-})();
+  } catch (e) {
+    console.warn("Failed to create upload dirs:", e);
+  }
+};
+ensureDirs();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
+  destination: async (req, file, cb) => {
+    await ensureDirs(); // double check
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -116,7 +127,7 @@ router.post("/upload-3d", upload.single("file"), async (req, res) => {
 router.get("/files/:filename", (req, res) => {
   res.set("Cache-Control", "public, max-age=31536000, immutable");
   const filename = req.params.filename;
-  const filePath = path.join(process.cwd(), "uploads", filename);
+  const filePath = path.join(uploadDir, filename);
 
   res.sendFile(filePath, (err) => {
     if (err) {
@@ -129,7 +140,7 @@ router.get("/files/:filename", (req, res) => {
 router.get("/converted/:filename", (req, res) => {
   res.set("Cache-Control", "public, max-age=31536000, immutable");
   const filename = req.params.filename;
-  const filePath = path.join(process.cwd(), "uploads", "converted", filename);
+  const filePath = path.join(uploadDir, "converted", filename);
 
   res.sendFile(filePath, (err) => {
     if (err) {
